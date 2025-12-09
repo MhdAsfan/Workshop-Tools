@@ -95,4 +95,4 @@ Now go collect that $4,000–$50,000 bag.
 Just run:
 ```bash
 chmod +x hunterx.sh
-./hunterx.sh jbl.com
+./hunterx.sh target.com
