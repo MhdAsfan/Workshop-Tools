@@ -52,3 +52,230 @@ if __name__ == "__main__":
     with open('report.json', 'w') as f:
         json.dump(report, f, indent=2)
     print(f"[+] Report saved: report.json | Live hosts: {len(live)}") [web:10][web:1]
+
+
+
+
+
+
+
+
+
+
+
+# Power Recon – Advanced Subdomain Enumeration & HTTP Status Mapping
+
+Power Recon is a bash-based recon framework that performs deep subdomain enumeration using multiple modern techniques (passive, active, brute-force, permutations) and finishes with a single file of alive hosts and HTTP status codes using httpx.[2][3][1]
+
+## Features
+
+- Passive and active subdomain enumeration with **Amass** and **Subfinder** (CT logs, OSINT, DNS data when configured).[4][2]
+- Optional brute-force DNS enumeration with **dnsx** and your own subdomain wordlist.[3][5]
+- Optional permutations/mutations with **dnsgen** + dnsx to uncover hidden, environment-specific, and legacy subdomains.[6][7]
+- Final HTTP probing with **httpx**, producing `alive_with_status.txt` (URL, status code, title) for prioritizing targets.[5][3]
+
+***
+
+## Requirements
+
+Install the following tools on Linux/Kali (via Go, package managers, or official repos):[2][3][5]
+
+- **Amass** – subdomain enumeration (passive + active).[4][2]
+- **Subfinder** – fast passive subdomain discovery.[3][6]
+- **dnsx** – DNS toolkit for resolving and brute forcing.[5]
+- **dnsgen** – permutations/mutations for subdomains.[7][6]
+- **httpx** – HTTP probing with status codes and titles.[3][5]
+
+You also need wordlists:
+
+- `wordlists/subdomains.txt`  
+  - A large subdomain wordlist (e.g., from SecLists + custom tokens).[6]
+- `wordlists/permutations.txt`  
+  - Words like `dev`, `test`, `stg`, `prod`, `old`, `beta`, environment/region codes, product names, etc.[7][6]
+
+Ensure the script is executable:
+
+```bash
+chmod +x power_recon.sh
+```
+
+***
+
+## Script: `power_recon.sh`
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+DOMAIN="${1:-}"
+
+if [ -z "$DOMAIN" ]; then
+  echo "Usage: $0 target.com"
+  exit 1
+fi
+
+OUTDIR="recon_$DOMAIN"
+mkdir -p "$OUTDIR"
+
+ALL_SUBS="$OUTDIR/all_subdomains.txt"
+ALIVE_OUT="$OUTDIR/alive_with_status.txt"
+
+SUB_WORDLIST="wordlists/subdomains.txt"      # edit path
+PERM_WORDLIST="wordlists/permutations.txt"   # edit path
+
+echo "[+] Domain       : $DOMAIN"
+echo "[+] Output dir   : $OUTDIR"
+echo "[+] Sub wordlist : $SUB_WORDLIST"
+echo "[+] Perm wordlist: $PERM_WORDLIST"
+echo
+
+#####################################
+# 1) Passive + active enum (Amass & Subfinder)
+#####################################
+echo "[+] Amass passive..."
+amass enum -passive -d "$DOMAIN" -o "$OUTDIR/amass_passive.txt" || true
+
+echo "[+] Amass active (if resolvers & configs set)..."
+amass enum -active -d "$DOMAIN" -o "$OUTDIR/amass_active.txt" || true
+
+echo "[+] Subfinder (all sources)..."
+subfinder -all -d "$DOMAIN" -o "$OUTDIR/subfinder.txt" || true
+
+#####################################
+# 2) Brute-force DNS with dnsx (optional)
+#####################################
+if [ -f "$SUB_WORDLIST" ]; then
+  echo "[+] dnsx brute-force with wordlist..."
+  dnsx -d "$DOMAIN" -w "$SUB_WORDLIST" -o "$OUTDIR/dnsx_bruteforce.txt" || true
+else
+  echo "[!] Skipping dnsx brute-force (no sub wordlist found at $SUB_WORDLIST)"
+fi
+
+#####################################
+# 3) Merge & dedupe initial subdomains
+#####################################
+echo "[+] Merging and deduping initial subdomains..."
+cat "$OUTDIR"/amass_*.txt "$OUTDIR"/subfinder.txt "$OUTDIR"/dnsx_bruteforce.txt 2>/dev/null | \
+  grep -v '^$' | sort -u > "$OUTDIR/seed_subs.txt"
+
+SEED_COUNT=$(wc -l < "$OUTDIR/seed_subs.txt" || echo 0)
+echo "[+] Seed subdomains: $SEED_COUNT"
+
+cp "$OUTDIR/seed_subs.txt" "$ALL_SUBS"
+
+#####################################
+# 4) Permutations with dnsgen (optional)
+#####################################
+if [ -f "$PERM_WORDLIST" ]; then
+  echo "[+] Generating permutations with dnsgen..."
+  dnsgen "$OUTDIR/seed_subs.txt" -w "$PERM_WORDLIST" > "$OUTDIR/perms_raw.txt" || true
+
+  echo "[+] Resolving permutations with dnsx..."
+  dnsx -l "$OUTDIR/perms_raw.txt" -o "$OUTDIR/perms_resolved.txt" || true
+
+  echo "[+] Adding resolved permutations to all_subdomains..."
+  cat "$OUTDIR/perms_resolved.txt" >> "$ALL_SUBS"
+  sort -u "$ALL_SUBS" -o "$ALL_SUBS"
+else
+  echo "[!] Skipping permutations (no perm wordlist found at $PERM_WORDLIST)"
+fi
+
+TOTAL_SUBS=$(wc -l < "$ALL_SUBS" || echo 0)
+echo "[+] Total unique subdomains (after perms): $TOTAL_SUBS"
+
+#####################################
+# 5) HTTP probing with httpx (final status codes)
+#####################################
+echo "[+] Probing with httpx (status-code, title, follows redirects)..."
+httpx -silent -l "$ALL_SUBS" \
+  -status-code -title -follow-redirects \
+  -o "$ALIVE_OUT"
+
+ALIVE_COUNT=$(wc -l < "$ALIVE_OUT" || echo 0)
+
+echo
+echo "[+] Recon complete for $DOMAIN"
+echo "[+] All subdomains           : $ALL_SUBS"
+echo "[+] Alive hosts + status code: $ALIVE_OUT"
+echo "[+] Alive count              : $ALIVE_COUNT"
+```
+
+***
+
+## Usage
+
+### Basic run
+
+```bash
+./power_recon.sh target.com
+```
+
+Pipeline steps:[2][4][3]
+
+1. **Amass** (passive + active) and **Subfinder** enumerate subdomains from CT, OSINT, DNS sources.[4][2]
+2. **dnsx** brute-forces subdomains using `wordlists/subdomains.txt` (if present).[5][3]
+3. Outputs are merged/deduped into `recon_target.com/seed_subs.txt`.  
+4. **dnsgen** generates permutations from `seed_subs.txt` using `wordlists/permutations.txt`, then **dnsx** resolves them (if wordlist exists).[6][7]
+5. All subdomains are merged into `recon_target.com/all_subdomains.txt`.  
+6. **httpx** probes all entries and writes alive URLs + HTTP status codes + titles into `recon_target.com/alive_with_status.txt`.[3][5]
+
+***
+
+## Output structure
+
+For `target.com`, you get:
+
+```text
+recon_target.com/
+  amass_passive.txt        # Amass passive results
+  amass_active.txt         # Amass active results
+  subfinder.txt            # Subfinder results
+  dnsx_bruteforce.txt      # dnsx brute-force results (if wordlist exists)
+  seed_subs.txt            # merged & deduped initial subdomains
+  perms_raw.txt            # dnsgen-generated permutations (optional)
+  perms_resolved.txt       # resolved permutations via dnsx (optional)
+  all_subdomains.txt       # final unique subdomain list
+  alive_with_status.txt    # final alive hosts with HTTP status codes and titles
+```
+
+Key files:[5][3]
+
+- `all_subdomains.txt` – union of all discovered subdomains.  
+- `alive_with_status.txt` – only live hosts, with status codes and titles from httpx.  
+
+***
+
+## Tuning for deeper recon
+
+- **Customize wordlists**  
+  - Add company-specific tokens (brands, product names, country codes, environment tags) into both `subdomains.txt` and `permutations.txt`.[7][6]
+
+- **Configure Amass & Subfinder**  
+  - Set up their config files with API keys (SecurityTrails, Censys, etc.) to unlock more passive data sources.[2][4][6]
+
+- **Scale resources**  
+  - For large programs, run on a VPS or powerful machine and be prepared for long runs; permutations and big wordlists can generate many candidates.[1][3]
+
+***
+
+## Post-processing ideas
+
+Once `alive_with_status.txt` is generated, you can:
+
+- Filter by status code or title, for example:  
+  - `grep " 200 " alive_with_status.txt`  
+  - `grep -i "admin" alive_with_status.txt`  
+- Feed the alive hosts into:  
+  - **nuclei** for template-based vulnerability checks.[6]
+  - **ffuf** for directory/vhost fuzzing.[7][6]
+  - Burp Suite for deeper manual testing.  
+
+This all-in-one file gives you a complete view of the recon logic, script, and usage so you can drop it straight into a GitHub repo and iterate from there.[1][2][6]
+
+[1](https://www.yeswehack.com/learn-bug-bounty/subdomain-enumeration-expand-attack-surface)
+[2](https://sidxparab.gitbook.io/subdomain-enumeration-guide)
+[3](https://www.stationx.net/how-to-perform-subdomain-enumeration/)
+[4](https://www.vaadata.com/blog/subdomain-enumeration-techniques-and-tools/)
+[5](https://github.com/projectdiscovery/dnsx)
+[6](https://www.uprootsecurity.com/blog/the-best-subdomain-enumeration-techniques-guide)
+[7](https://infosecwriteups.com/master-subdomain-hunting-art-of-finding-hidden-assets-3351b3c8467a)
