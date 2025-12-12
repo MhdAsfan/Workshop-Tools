@@ -1,0 +1,54 @@
+#!/usr/bin/env python3
+import subprocess, argparse, json, os, sys
+from concurrent.futures import ThreadPoolExecutor
+import requests
+
+def run_cmd(cmd):
+    return subprocess.run(cmd, shell=True, capture_output=True, text=True)
+
+def enum_subs(domain):
+    subs = set()
+    # Amass + Subfinder parallel
+    for tool in ['amass enum -d {} -o amass.txt'.format(domain),
+                 'subfinder -d {} -o subfinder.txt'.format(domain)]:
+        result = run_cmd(tool)
+        subs.update(open(result.stdout.split()[-1] if result.stdout else '').read().split())
+    return list(subs)
+
+def validate_live(subs):
+    live = []
+    def check(sub):
+        try:
+            r = requests.get(f"http://{sub}", timeout=5)
+            if r.status_code == 200: live.append(sub)
+        except: pass
+    with ThreadPoolExecutor(50) as ex: ex.map(check, subs)
+    return live
+
+def gf_scan(live, patterns=['xss', 'ssrf', 'idor']):
+    # Simplified gf integration - fetch patterns from your repo
+    report = {}
+    for host in live:
+        report[host] = {'patterns': []}
+        for pat in patterns:
+            # Run gf or equivalent wordlist grep
+            cmd = f"gf {pat} urls.txt | grep {host}"
+            matches = run_cmd(cmd).stdout
+            if matches: report[host]['patterns'].append(pat)
+    return report
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-d', '--domain', required=True)
+    args = parser.parse_args()
+    
+    print(f"[+] Recon on {args.domain}")
+    subs = enum_subs(args.domain)
+    live = validate_live(subs)
+    
+    report = {'domain': args.domain, 'subdomains': subs, 'live': live}
+    report['vulns'] = gf_scan(live)
+    
+    with open('report.json', 'w') as f:
+        json.dump(report, f, indent=2)
+    print(f"[+] Report saved: report.json | Live hosts: {len(live)}") [web:10][web:1]
