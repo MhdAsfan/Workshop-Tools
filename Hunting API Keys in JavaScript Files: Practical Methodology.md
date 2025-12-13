@@ -3,8 +3,7 @@
 
 ## 1. Objective
 
-Build a repeatable workflow to find exposed API keys and other secrets inside JavaScript files for bug bounty and penetration testing.[web:4][web:6]
-
+Build a repeatable workflow to find exposed API keys and other secrets inside JavaScript files for bug bounty and penetration testing.
 ---
 
 ## 2. High-Level Flow
@@ -15,7 +14,7 @@ Build a repeatable workflow to find exposed API keys and other secrets inside Ja
 4. Download JS and source maps locally.
 5. Search for secrets (manual + automated).
 6. Classify and validate keys.
-7. Report via responsible disclosure.[web:4][web:9]
+7. Report via responsible disclosure.
 
 ---
 
@@ -35,7 +34,7 @@ Merge and deduplicate:
 cat subs*.txt | sort -u > all_subs.txt
 ```
 
-These subdomains become the base for URL and JS hunting.[web:7]
+These subdomains become the base for URL and JS hunting.
 
 ### 3.2 Collecting JavaScript URLs with gau
 
@@ -55,7 +54,7 @@ done < all_subs.txt
 sort -u js_urls_raw.txt > js_urls.txt
 ```
 
-This often reveals old, forgotten JS files that still contain secrets.[web:7][web:10]
+This often reveals old, forgotten JS files that still contain secrets.
 
 ---
 
@@ -69,7 +68,7 @@ Only keep JS endpoints that respond with HTTP 200:
 cat js_urls.txt | httpx -silent -mc 200 -threads 50 -o js_alive.txt
 ```
 
-Adjust status codes if needed (e.g., `-mc 200,302`).[web:7]
+Adjust status codes if needed (e.g., `-mc 200,302`).
 
 ### 4.2 Download with wget
 
@@ -83,8 +82,7 @@ wget --wait=0.5 --random-wait \
      -P downloaded_js
 ```
 
-Now you have all JS files locally for fast searching and offline analysis.[web:4]
-
+Now you have all JS files locally for fast searching and offline analysis.
 ---
 
 ## 5. Manual Analysis in Browser
@@ -100,13 +98,13 @@ Steps:
    - `apiKey`, `apikey`, `api_key`
    - `secret`, `client_secret`
    - `token`, `auth`, `authorization`, `Bearer`
-   - Vendor patterns like `AKIA` (AWS), `AIza` (Firebase), `sk_live_` / `pk_live_` (Stripe), `ghp_` (GitHub).[web:6][web:8]
+   - Vendor patterns like `AKIA` (AWS), `AIza` (Firebase), `sk_live_` / `pk_live_` (Stripe), `ghp_` (GitHub).
 
 Look for:
 
 - Config objects (e.g., Firebase, SDK configs).
 - Hardcoded credentials or tokens.
-- Endpoints pointing to internal APIs, admin panels, or staging.[web:6]
+- Endpoints pointing to internal APIs, admin panels, or staging.
 
 ### 5.2 DevTools: Network Tab & Source Maps
 
@@ -116,13 +114,12 @@ Look for:
    - `config`, `auth`, `token` in request paths.
 3. Inspect:
    - Responses for embedded keys or JWTs.
-   - `Authorization` / `x-api-key` headers in requests.[web:6]
-
+   - `Authorization` / `x-api-key` headers in requests.
 Check for source maps:
 
 - At bottom of minified bundles, look for:
   - `//# sourceMappingURL=app.js.map`
-- Open that `.map` file directly; it can expose readable source with comments and clearer variable names, often leaking more context and secrets.[web:6]
+- Open that `.map` file directly; it can expose readable source with comments and clearer variable names, often leaking more context and secrets.
 
 ---
 
@@ -136,7 +133,7 @@ From your `downloaded_js` directory, use `ripgrep` (rg) or `grep` with tailored 
 rg -n -i 'apiKey|apikey|api_key|secret|token|auth|x-api-key|Bearer|client_secret' downloaded_js/
 ```
 
-This quickly surfaces likely locations of secrets, auth headers, and tokens.[web:4][web:11]
+This quickly surfaces likely locations of secrets, auth headers, and tokens.
 
 ### 6.2 Vendor-Specific Patterns
 
@@ -172,8 +169,7 @@ Examples (extend as needed):
   rg -n 'api_key[="\']?[A-Za-z0-9_\-]{8,}|client_secret[="\']?[A-Za-z0-9_\-]{8,}' downloaded_js/
   ```
 
-You can also reuse or adapt public regex collections for API keys to increase coverage.[web:11]
-
+You can also reuse or adapt public regex collections for API keys to increase coverage.
 ---
 
 ## 7. Classifying and Assessing Impact
@@ -183,11 +179,11 @@ Once potential secrets are found, classify them:
 - **AWS Keys**: May allow S3 access, IAM actions, or resource management depending on permissions.
 - **Stripe Keys**:
   - `pk_live_...` → publishable, low risk by itself.
-  - `sk_live_...` → secret; high risk (charges, refunds, etc.).[web:11]
+  - `sk_live_...` → secret; high risk (charges, refunds, etc.).
 - **Firebase Config**:
-  - Public API key alone is not always critical, but misconfigured rules can expose DB read/write, storage, or authentication bypass.[web:2][web:9]
-- **GitHub tokens (`ghp_...`)**: Can allow repo read/write, access to private code, or internal docs depending on scopes.[web:8]
-- **Custom / Internal keys**: Look at context (used in `Authorization` headers, access to `/api/*`, or admin endpoints) to determine sensitivity.[web:6]
+  - Public API key alone is not always critical, but misconfigured rules can expose DB read/write, storage, or authentication bypass.
+- **GitHub tokens (`ghp_...`)**: Can allow repo read/write, access to private code, or internal docs depending on scopes.
+- **Custom / Internal keys**: Look at context (used in `Authorization` headers, access to `/api/*`, or admin endpoints) to determine sensitivity.
 
 Impact evaluation:
 
@@ -196,8 +192,7 @@ Impact evaluation:
   - Read sensitive data.
   - Write/modify data.
   - Perform admin actions.
-  - Trigger financial consequences (billing, resource creation).[web:4][web:9]
-
+  - Trigger financial consequences (billing, resource creation)
 Follow program rules and avoid destructive or out-of-scope actions.
 
 ---
@@ -207,14 +202,12 @@ Follow program rules and avoid destructive or out-of-scope actions.
 Beyond JS on the main site, use GitHub and search engines to find more leaks:
 
 - GitHub search syntax for `apiKey`, `client_secret`, `token`, etc.
-- Custom dorks combining `site:github.com` + target’s org/repo names and secret-related keywords.[web:8][web:9]
-
+- Custom dorks combining `site:github.com` + target’s org/repo names and secret-related keywords.
 This often surfaces keys in:
 
 - Old front-end repos.
 - Internal tooling.
-- Demo or PoC projects accidentally pushed public.[web:8]
-
+- Demo or PoC projects accidentally pushed public.
 ---
 
 ## 9. Reporting and Responsible Disclosure
@@ -240,7 +233,7 @@ Avoid posting keys publicly or sharing them outside the program.
 
 - Combine **automated scans** (rg + regex packs) with **manual JS reading** for the best results, especially on critical targets.
 - Save this methodology as `js_api_key_hunting.md` in your notes repo and adapt commands per engagement (e.g., different wordlists or regexes).
-- Over time, maintain your own curated regex list, tooling wrappers, and script automation around this workflow.[web:6][web:11]
+- Over time, maintain your own curated regex list, tooling wrappers, and script automation around this workflow.
 ```
 
 [1](https://www.linkedin.com/posts/insha-j-38b822225_hunting-api-keys-in-javascript-files-a-bug-activity-7372637308849655808-I9dj)
