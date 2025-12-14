@@ -1,4 +1,4 @@
-``bash
+
 #!/usr/bin/env bash
 set -euo pipefail
 
@@ -130,4 +130,4 @@ echo "[+] Done. Check:"
 echo "    $ALL_SUBS"
 echo "    $ALIVE_OUT"
 echo "    $LOGFILE"
-```
+
